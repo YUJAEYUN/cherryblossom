@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="손 제스처로 벚꽃나무가 피어나는 인터랙티브 웹 경험. 주먹을 쥐면 봉우리, 손을 펼치면 만개!" />
+  <title>손끝의 봄</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@300;400;600&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ─── Reset & Base ─── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      font-family: 'Noto Serif KR', serif;
+      user-select: none;
+    }
+
+    /* ─── Background (동적으로 js 에서 색상 보간) ─── */
+    #bg {
+      position: fixed; inset: 0; z-index: 0;
+      background: #0a0a1a;
+      transition: background 0.3s ease;
+    }
+
+    /* ─── Tree Layer (video) ─── */
+    #tree-wrap {
+      position: fixed; inset: 0; z-index: 1;
+      display: flex; align-items: center; justify-content: center;
+      pointer-events: none;
+    }
+
+    #tree-video {
+      position: absolute;
+      width: 100%; height: 100%;
+      object-fit: contain;
+      object-position: center bottom;
+    }
+
+    /* ─── Canvas (파티클 최상위) ─── */
+    #petal-canvas {
+      position: fixed; inset: 0; z-index: 2;
+      pointer-events: none;
+    }
+
+    /* ─── UI Overlay ─── */
+    #ui {
+      position: fixed; inset: 0; z-index: 3;
+      pointer-events: none;
+    }
+
+    /* 상단 타이틀 */
+    #title {
+      position: absolute; top: max(1.5rem, 4vh); left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      color: rgba(255,255,255,0.9);
+      text-shadow: 0 2px 20px rgba(0,0,0,0.5);
+    }
+    #title h1 { font-size: clamp(1.1rem, 4vw, 1.8rem); font-weight: 300; letter-spacing: 0.15em; display: flex; align-items: center; justify-content: center; gap: 0.4em; }
+    #title p  { font-size: clamp(0.65rem, 2.5vw, 0.85rem); opacity: 0.7; margin-top: 0.3rem; letter-spacing: 0.08em; }
+    .title-blossom { width: 1.3em; height: 1.3em; flex-shrink: 0; }
+
+    /* 안내 메시지 (중앙 하단) */
+    #hint {
+      position: absolute; bottom: max(6rem, 14vh); left: 50%;
+      transform: translateX(-50%);
+      display: flex; flex-direction: column; align-items: center; gap: 0.4rem;
+      color: rgba(255,255,255,0.85);
+      text-align: center;
+      transition: opacity 0.5s ease;
+    }
+    #hint-emoji { width: clamp(2rem, 8vw, 3rem); height: clamp(2rem, 8vw, 3rem); animation: pulse 1.8s ease-in-out infinite; }
+    #hint-emoji svg { width: 100%; height: 100%; display: block; }
+    #hint-text  { font-size: clamp(0.75rem, 3vw, 1rem); letter-spacing: 0.1em; }
+    #hand-state svg { width: clamp(1.5rem, 5vw, 2.2rem); height: clamp(1.5rem, 5vw, 2.2rem); }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50%       { transform: scale(1.15); }
+    }
+
+    /* 개화율 바 */
+    #bloom-bar-wrap {
+      position: absolute; bottom: max(3rem, 7vh); left: 50%;
+      transform: translateX(-50%);
+      width: min(260px, 60vw);
+      display: flex; flex-direction: column; align-items: center; gap: 0.4rem;
+    }
+    #bloom-label {
+      font-size: 0.7rem; color: rgba(255,255,255,0.6); letter-spacing: 0.12em;
+    }
+    #bloom-bar-bg {
+      width: 100%; height: 4px; background: rgba(255,255,255,0.15);
+      border-radius: 99px; overflow: hidden;
+    }
+    #bloom-bar-fill {
+      height: 100%; width: 0%;
+      background: linear-gradient(90deg, #ffb7c5, #ff6ea0);
+      border-radius: 99px;
+      transition: width 0.1s ease;
+      box-shadow: 0 0 8px rgba(255,110,160,0.6);
+    }
+
+    /* 모바일 슬라이더 */
+    #mobile-slider-wrap {
+      position: absolute; bottom: max(3rem, 7vh); left: 50%;
+      transform: translateX(-50%);
+      width: min(320px, 80vw);
+      display: none;
+      flex-direction: column; align-items: center; gap: 0.6rem;
+      pointer-events: all;
+    }
+    #mobile-slider-label {
+      font-size: 0.7rem; color: rgba(255,255,255,0.6); letter-spacing: 0.12em;
+    }
+    #mobile-slider {
+      width: 100%; -webkit-appearance: none; appearance: none;
+      height: 4px; border-radius: 99px;
+      background: linear-gradient(90deg, #ffb7c5 0%, #ffb7c5 0%, rgba(255,255,255,0.15) 0%);
+      outline: none; cursor: pointer;
+    }
+    #mobile-slider::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 24px; height: 24px; border-radius: 50%;
+      background: radial-gradient(circle, #ff8fb8, #ff3c7a);
+      box-shadow: 0 0 10px rgba(255,60,122,0.5);
+      cursor: grab;
+    }
+    #mobile-slider::-moz-range-thumb {
+      width: 24px; height: 24px; border-radius: 50%;
+      background: radial-gradient(circle, #ff8fb8, #ff3c7a);
+      border: none; cursor: grab;
+    }
+
+    /* 카메라 미리보기 */
+    #camera-wrap {
+      position: absolute; right: max(1rem, 3vw); bottom: max(1rem, 3vh);
+      width: clamp(80px, 18vw, 140px);
+      display: flex; flex-direction: column; align-items: center; gap: 0.3rem;
+      pointer-events: all;
+    }
+    #camera-video {
+      width: 100%; aspect-ratio: 1 / 1;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 2px solid rgba(255,183,197,0.5);
+      box-shadow: 0 0 20px rgba(255,130,170,0.3);
+      transform: scaleX(-1); /* 거울 모드 */
+      background: #111;
+    }
+    #camera-status {
+      font-size: 0.55rem; color: rgba(255,255,255,0.5);
+      letter-spacing: 0.05em; text-align: center;
+    }
+
+    /* 권한 요청 오버레이 */
+    #permission-overlay {
+      position: fixed; inset: 0; z-index: 10;
+      background: rgba(0,0,0,0.85);
+      backdrop-filter: blur(8px);
+      display: flex; align-items: center; justify-content: center;
+      pointer-events: all;
+    }
+    #permission-card {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,183,197,0.2);
+      border-radius: 20px;
+      padding: max(2rem, 5vw) max(2.5rem, 7vw);
+      text-align: center;
+      max-width: min(380px, 90vw);
+      color: white;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.4);
+    }
+    #permission-card .icon { font-size: 3.5rem; margin-bottom: 1rem; }
+    #permission-card h2 { font-size: 1.2rem; font-weight: 400; margin-bottom: 0.6rem; letter-spacing: 0.08em; }
+    #permission-card p  { font-size: 0.8rem; color: rgba(255,255,255,0.6); line-height: 1.7; margin-bottom: 1.6rem; }
+    .btn-group { display: flex; flex-direction: column; gap: 0.7rem; }
+    .btn {
+      padding: 0.75rem 1.5rem; border-radius: 50px; font-family: inherit;
+      font-size: 0.85rem; letter-spacing: 0.1em; cursor: pointer;
+      border: none; transition: all 0.2s ease;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #ff8fb8, #e8528a);
+      color: white;
+      box-shadow: 0 4px 15px rgba(232,82,138,0.4);
+    }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(232,82,138,0.5); }
+    .btn-secondary {
+      background: transparent;
+      color: rgba(255,255,255,0.6);
+      border: 1px solid rgba(255,255,255,0.2);
+      font-size: 0.75rem;
+    }
+    .btn-secondary:hover { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.8); }
+
+    /* 로딩 스피너 */
+    #loading {
+      position: fixed; inset: 0; z-index: 9;
+      background: rgba(0,0,0,0.7); backdrop-filter: blur(4px);
+      display: none; align-items: center; justify-content: center;
+      flex-direction: column; gap: 1rem; color: white;
+    }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid rgba(255,183,197,0.2);
+      border-top-color: #ffb7c5;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loading p { font-size: 0.8rem; color: rgba(255,255,255,0.6); letter-spacing: 0.1em; }
+
+    /* 손 인식 상태 표시 */
+    #hand-state {
+      position: absolute; top: max(5.5rem, 12vh); left: 50%;
+      transform: translateX(-50%);
+      font-size: clamp(1.5rem, 5vw, 2.2rem);
+      opacity: 0; transition: opacity 0.3s ease;
+      filter: drop-shadow(0 2px 8px rgba(0,0,0,0.5));
+    }
+
+    /* 반응형: 모바일에서 슬라이더 모드 */
+    @media (max-width: 768px) {
+      #mobile-slider-wrap { display: flex; }
+      #bloom-bar-wrap { bottom: max(7rem, 16vh); }
+      #camera-wrap { 
+        width: clamp(60px, 16vw, 90px);
+        right: 0.7rem; bottom: 0.7rem;
+      }
+    }
+
+    /* 워터마크 커버 — 검정 고정 */
+    #wm-cover {
+      position: absolute;
+      z-index: 2;
+      pointer-events: none;
+      background: #000;
+    }
+
+    /* 풍경 효과: 나무 아래 그라디언트 페이드 */
+    #ground-fade {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      height: 15vh; z-index: 1;
+      pointer-events: none;
+      background: linear-gradient(to top, rgba(0,0,0,0.3), transparent);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 배경 -->
+  <div id="bg"></div>
+
+  <!-- 벚꽃나무 영상 레이어 -->
+  <div id="tree-wrap">
+    <!-- KlingAI 워터마크 커버 -->
+    <div id="wm-cover"></div>
+    <video id="tree-video"
+      src="assets/cherry_blossom.mp4"
+      preload="auto"
+      muted
+      autoplay
+      playsinline
+      webkit-playsinline
+    ></video>
+  </div>
+
+  <!-- 그라운드 페이드 -->
+  <div id="ground-fade"></div>
+
+  <!-- 꽃잎 파티클 캔버스 -->
+  <canvas id="petal-canvas"></canvas>
+
+  <!-- UI 오버레이 -->
+  <div id="ui">
+    <!-- 타이틀 -->
+    <div id="title">
+      <h1>
+        <svg class="title-blossom" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+          <g transform="translate(16,16)">
+            <ellipse rx="4" ry="7" cy="-5" fill="#ffb7c5" transform="rotate(0)"/>
+            <ellipse rx="4" ry="7" cy="-5" fill="#ffc8d8" transform="rotate(72)"/>
+            <ellipse rx="4" ry="7" cy="-5" fill="#ffb7c5" transform="rotate(144)"/>
+            <ellipse rx="4" ry="7" cy="-5" fill="#ffc8d8" transform="rotate(216)"/>
+            <ellipse rx="4" ry="7" cy="-5" fill="#ffb7c5" transform="rotate(288)"/>
+            <circle r="3.5" fill="#fff0f5"/>
+            <circle r="1.8" fill="#ff8faa"/>
+            <circle cx="0" cy="-2.2" r="0.55" fill="#ff6ea0"/>
+            <circle cx="1.9" cy="1.1" r="0.55" fill="#ff6ea0"/>
+            <circle cx="-1.9" cy="1.1" r="0.55" fill="#ff6ea0"/>
+          </g>
+        </svg>
+        손끝의 봄
+      </h1>
+      <p>손을 펼쳐 봄을 불러오세요</p>
+    </div>
+
+    <!-- 손 상태 -->
+    <div id="hand-state"></div>
+
+    <!-- 안내 힌트 -->
+    <div id="hint">
+      <div id="hint-emoji"></div>
+      <div id="hint-text">손을 천천히 펼쳐보세요</div>
+    </div>
+
+    <!-- 개화율 바 -->
+    <div id="bloom-bar-wrap">
+      <div id="bloom-label">개화율</div>
+      <div id="bloom-bar-bg">
+        <div id="bloom-bar-fill"></div>
+      </div>
+    </div>
+
+    <!-- 모바일 슬라이더 -->
+    <div id="mobile-slider-wrap">
+      <div id="mobile-slider-label">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" style="width:0.9em;height:0.9em;vertical-align:middle;margin-right:0.3em">
+          <g transform="translate(8,8)">
+            <ellipse rx="2" ry="3.5" cy="-2.5" fill="#ffb7c5" transform="rotate(0)"/>
+            <ellipse rx="2" ry="3.5" cy="-2.5" fill="#ffb7c5" transform="rotate(72)"/>
+            <ellipse rx="2" ry="3.5" cy="-2.5" fill="#ffb7c5" transform="rotate(144)"/>
+            <ellipse rx="2" ry="3.5" cy="-2.5" fill="#ffb7c5" transform="rotate(216)"/>
+            <ellipse rx="2" ry="3.5" cy="-2.5" fill="#ffb7c5" transform="rotate(288)"/>
+            <circle r="1.8" fill="#fff0f5"/>
+          </g>
+        </svg>드래그하여 봄을 피워보세요
+      </div>
+      <input type="range" id="mobile-slider" min="0" max="100" value="0" />
+    </div>
+
+    <!-- 카메라 미리보기 -->
+    <div id="camera-wrap">
+      <video id="camera-video" playsinline muted autoplay></video>
+      <div id="camera-status">카메라 준비 중…</div>
+    </div>
+  </div>
+
+  <!-- 권한 요청 오버레이 -->
+  <div id="permission-overlay">
+    <div id="permission-card">
+      <div class="icon">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="rgba(255,183,197,0.9)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="width:3.5rem;height:3.5rem">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+          <circle cx="12" cy="13" r="4"/>
+        </svg>
+      </div>
+      <h2>카메라가 필요해요</h2>
+      <p>손 동작으로 벚꽃을 피우기 위해<br/>카메라를 사용합니다.<br/>데이터는 기기 내부에서만 처리됩니다.</p>
+      <div class="btn-group">
+        <button class="btn btn-primary" id="btn-allow">카메라 허용하기</button>
+        <button class="btn btn-secondary" id="btn-skip">카메라 없이 체험하기 (슬라이더)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 로딩 -->
+  <div id="loading">
+    <div class="spinner"></div>
+    <p>손 인식 준비 중…</p>
+  </div>
+
+  <!-- MediaPipe Hands CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+  <script>
+  /* ═══════════════════════════════════════════════════
+      🌸 벚꽃 인터랙티브 — Main Script
+     ═══════════════════════════════════════════════════ */
+
+  // ── DOM refs ──
+  const bg            = document.getElementById('bg');
+  const treeVideo     = document.getElementById('tree-video');
+  const canvas        = document.getElementById('petal-canvas');
+  const ctx           = canvas.getContext('2d');
+  const hintEl        = document.getElementById('hint');
+  const hintEmoji     = document.getElementById('hint-emoji');
+  const hintText      = document.getElementById('hint-text');
+  const handStateEl   = document.getElementById('hand-state');
+  const bloomFill     = document.getElementById('bloom-bar-fill');
+  const permOverlay   = document.getElementById('permission-overlay');
+  const loadingEl     = document.getElementById('loading');
+  const cameraVideo   = document.getElementById('camera-video');
+  const cameraStatus  = document.getElementById('camera-status');
+  const mobileSlider  = document.getElementById('mobile-slider');
+  const btnAllow      = document.getElementById('btn-allow');
+  const btnSkip       = document.getElementById('btn-skip');
+
+  // ── 영상 준비 ──
+  // autoplay(muted) 로 브라우저가 재생을 시작하면 즉시 pause → currentTime scrubbing unlock
+  treeVideo.addEventListener('play', function onFirstPlay() {
+    treeVideo.removeEventListener('play', onFirstPlay);
+    treeVideo.pause();
+    treeVideo.currentTime = 0;
+  });
+
+  // 역재생 seek 쌓임 방지: seeking/seeked 이벤트로 플래그 관리
+  treeVideo._seeking = false;
+  treeVideo.addEventListener('seeking', () => { treeVideo._seeking = true; });
+  treeVideo.addEventListener('seeked',  () => { treeVideo._seeking = false; });
+
+  // ── State ──
+  let bloomRate       = 0;      // 현재 적용 개화율 (0~1)
+  let targetBloom     = 0;      // 목표 개화율 (손 인식에서 갱신)
+  let handVisible     = false;
+  let cameraMode      = false;
+  let animFrameId     = null;
+  let hintShown       = true;
+  let hintHideTimer   = null;
+
+  // ── 배경 색상 보간 (봉우리: 어두운 navy, 만개: 밝은 핑크) ──
+  const BG_BUD   = { r: 10,  g: 10,  b: 26  };
+  const BG_BLOOM = { r: 255, g: 236, b: 245 };
+
+  function lerpColor(a, b, t) {
+    return {
+      r: Math.round(a.r + (b.r - a.r) * t),
+      g: Math.round(a.g + (b.g - a.g) * t),
+      b: Math.round(a.b + (b.b - a.b) * t),
+    };
+  }
+
+  // ── 개화율 적용 ──
+  function applyBloom(rate) {
+    const dur = treeVideo.duration;
+    if (dur && isFinite(dur)) {
+      const targetTime = Math.max(0, Math.min(dur, rate * dur));
+      const diff = targetTime - treeVideo.currentTime;
+
+      if (Math.abs(diff) < 0.03) {
+        // 목표 지점 도달 — 정지
+        treeVideo.pause();
+      } else if (diff > 0) {
+        // 앞으로 → seek 없이 실제 재생 (끊김 없음)
+        treeVideo.playbackRate = Math.min(16, diff * 10);
+        if (treeVideo.paused) treeVideo.play().catch(() => {});
+      } else {
+        // 뒤로 → 이전 seek 완료 후에만 다음 seek (seek 쌓임 방지)
+        if (!treeVideo.paused) treeVideo.pause();
+        if (!treeVideo._seeking && Math.abs(diff) > 0.03) {
+          const speed = Math.min(8, Math.abs(diff) * 10);
+          treeVideo.currentTime = Math.max(0, treeVideo.currentTime - speed / 60);
+        }
+      }
+    }
+
+    // 배경색 보간
+    const c = lerpColor(BG_BUD, BG_BLOOM, rate);
+    bg.style.background = `rgb(${c.r},${c.g},${c.b})`;
+
+
+    // 개화율 바
+    bloomFill.style.width = (rate * 100).toFixed(1) + '%';
+
+    // 슬라이더 그라디언트 동기화
+    const pct = (rate * 100).toFixed(1) + '%';
+    mobileSlider.style.background =
+      `linear-gradient(90deg, #ffb7c5 0%, #ffb7c5 ${pct}, rgba(255,255,255,0.15) ${pct})`;
+
+    // 힌트 숨기기 (개화율이 변하기 시작하면)
+    if (rate > 0.02 && hintShown) {
+      hintEl.style.opacity = '0';
+      hintShown = false;
+    }
+    if (rate < 0.01 && !hintShown) {
+      hintEl.style.opacity = '1';
+      hintShown = true;
+    }
+  }
+
+  // ── 스무딩 루프 ──
+  function smoothing() {
+    // lerp 스무딩 (급격한 변화 방지)
+    bloomRate += (targetBloom - bloomRate) * 0.15;
+    if (Math.abs(bloomRate - targetBloom) < 0.001) bloomRate = targetBloom;
+
+    applyBloom(bloomRate);
+    particleSystem.update(bloomRate);
+    particleSystem.draw();
+
+    animFrameId = requestAnimationFrame(smoothing);
+  }
+
+  /* ═══════════════ 꽃잎 파티클 시스템 ═══════════════ */
+  class Petal {
+    constructor() { this.reset(true); }
+
+    reset(init = false) {
+      this.x    = Math.random() * canvas.width;
+      this.y    = init ? Math.random() * canvas.height : -20;
+      this.size = Math.random() * 10 + 5;        // 5~15px
+      this.vy   = Math.random() * 1.2 + 0.5;    // 낙하 속도
+      this.vx   = Math.random() * 0.6 - 0.3;    // 좌우 초기 속도
+      this.angle      = Math.random() * Math.PI * 2;
+      this.angleSpeed = (Math.random() - 0.5) * 0.06;
+      this.sway       = Math.random() * Math.PI * 2; // sin 위상
+      this.swaySpeed  = Math.random() * 0.03 + 0.01;
+      this.swayAmp    = Math.random() * 1.5 + 0.5;  // 흔들림 폭
+      this.alpha      = Math.random() * 0.4 + 0.6;  // 0.6~1.0
+      // 색상: 연한 핑크 계열
+      const hue = 340 + Math.random() * 20;          // 340°~360°
+      const sat = 70 + Math.random() * 20;
+      const lig = 80 + Math.random() * 10;
+      this.color = `hsla(${hue},${sat}%,${lig}%,`;
+    }
+
+    update() {
+      this.sway  += this.swaySpeed;
+      this.x     += this.vx + Math.sin(this.sway) * this.swayAmp;
+      this.y     += this.vy;
+      this.angle += this.angleSpeed;
+
+      // 바닥 근처 fade out
+      const fadeStart = canvas.height * 0.85;
+      if (this.y > fadeStart) {
+        this.alpha -= 0.015;
+      }
+
+      // 화면 밖이면 리셋
+      if (this.y > canvas.height + 30 || this.alpha <= 0 ||
+          this.x < -30 || this.x > canvas.width + 30) {
+        this.reset();
+      }
+    }
+
+    draw(ctx) {
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      ctx.rotate(this.angle);
+      ctx.globalAlpha = Math.max(0, this.alpha);
+
+      // 꽃잎 모양 (타원형 꽃잎)
+      ctx.beginPath();
+      ctx.ellipse(0, 0, this.size * 0.5, this.size, 0, 0, Math.PI * 2);
+      ctx.fillStyle = this.color + this.alpha + ')';
+      ctx.fill();
+
+      // 꽃잎 중앙 라인 (결)
+      ctx.beginPath();
+      ctx.moveTo(0, -this.size * 0.8);
+      ctx.lineTo(0, this.size * 0.8);
+      ctx.strokeStyle = this.color + (this.alpha * 0.3) + ')';
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+
+      ctx.restore();
+    }
+  }
+
+  const particleSystem = {
+    petals: [],
+    maxPetals: 100,
+
+    targetCount(rate) {
+      // 개화율 0% → 0개, 50% → 30개, 100% → 100개
+      if (rate < 0.05) return 0;
+      return Math.floor(rate * rate * this.maxPetals);
+    },
+
+    update(rate) {
+      const target = this.targetCount(rate);
+
+      // 파티클 수 증가
+      while (this.petals.length < target) {
+        this.petals.push(new Petal());
+      }
+
+      // 파티클 수 감소 (뒤에서부터 제거)
+      if (this.petals.length > target) {
+        this.petals.splice(target);
+      }
+
+      // 업데이트
+      for (const p of this.petals) p.update();
+    },
+
+    draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (const p of this.petals) p.draw(ctx);
+    }
+  };
+
+  // ── 캔버스 리사이즈 ──
+  function resizeCanvas() {
+    canvas.width  = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  resizeCanvas();
+  window.addEventListener('resize', resizeCanvas);
+
+  // ── 워터마크 커버 위치 계산 ──
+  // object-fit: contain + object-position: center bottom 기준으로
+  // 비디오 실제 렌더링 영역을 계산해 커버를 정확히 붙임
+  const wmCoverEl = document.getElementById('wm-cover');
+  function positionWatermarkCover() {
+    if (!treeVideo.videoWidth || !treeVideo.videoHeight) return;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const videoRatio   = treeVideo.videoWidth / treeVideo.videoHeight;
+    const viewportRatio = vw / vh;
+
+    let contentW, contentH, contentX, contentY;
+    if (videoRatio > viewportRatio) {
+      // 영상이 뷰포트보다 가로 비율이 큼 → 너비 꽉 채움, 세로 남음
+      contentW = vw;
+      contentH = vw / videoRatio;
+      contentX = 0;
+      contentY = vh - contentH; // object-position: bottom
+    } else {
+      // 영상이 뷰포트보다 세로 비율이 큼 → 높이 꽉 채움, 좌우 남음
+      contentH = vh;
+      contentW = vh * videoRatio;
+      contentX = (vw - contentW) / 2; // object-position: center
+      contentY = 0;
+    }
+
+    // KlingAI 워터마크는 좌하단에 위치
+    const coverW = contentW * 0.22;
+    const coverH = contentH * 0.07;
+    wmCoverEl.style.left = (contentX + contentW - coverW) + 'px';
+    wmCoverEl.style.top    = (contentY + contentH - coverH) + 'px';
+    wmCoverEl.style.width  = coverW + 'px';
+    wmCoverEl.style.height = coverH + 'px';
+  }
+
+  treeVideo.addEventListener('loadedmetadata', positionWatermarkCover);
+  window.addEventListener('resize', positionWatermarkCover);
+  // 이미 메타데이터가 로드된 경우를 위한 즉시 호출
+  if (treeVideo.readyState >= 1) positionWatermarkCover();
+  else setTimeout(positionWatermarkCover, 500);
+
+  /* ═══════════════ MediaPipe 손 인식 ═══════════════ */
+
+  // 손이 얼마나 펴졌는지 연속값(0.0~1.0)으로 측정
+  // 각 손가락 tip이 pip보다 얼마나 위에 있는지를 손 크기로 정규화
+  function getHandOpenness(landmarks) {
+    // 손목(0) → 중지 MCP(9) 거리를 손 크기 기준으로 사용
+    const dx = landmarks[9].x - landmarks[0].x;
+    const dy = landmarks[9].y - landmarks[0].y;
+    const palmSize = Math.sqrt(dx * dx + dy * dy);
+    if (palmSize < 0.001) return 0;
+
+    // tip → mcp 거리 / palmSize 비율로 측정
+    // 손가락이 펴질수록 tip이 손목에서 멀어짐
+    const fingers = [
+      { tip: 8,  mcp: 5  }, // 검지
+      { tip: 12, mcp: 9  }, // 중지
+      { tip: 16, mcp: 13 }, // 약지
+      { tip: 20, mcp: 17 }, // 소지
+    ];
+    let total = 0;
+    for (const { tip, mcp } of fingers) {
+      const tx = landmarks[tip].x - landmarks[0].x;
+      const ty = landmarks[tip].y - landmarks[0].y;
+      const mx = landmarks[mcp].x - landmarks[0].x;
+      const my = landmarks[mcp].y - landmarks[0].y;
+      const tipDist = Math.sqrt(tx * tx + ty * ty);
+      const mcpDist = Math.sqrt(mx * mx + my * my);
+      // 펴진 정도: tip거리 / mcp거리. 주먹≈1.0, 완전펼침≈2.0
+      const ratio = mcpDist > 0.001 ? tipDist / mcpDist : 0;
+      total += Math.max(0, Math.min(1, (ratio - 1.0) / 0.9));
+    }
+    return total / 4; // 0~1
+  }
+
+  // ── 손 상태 SVG 아이콘 ──
+  const SVG_BUD = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+    <ellipse cx="12" cy="13" rx="4.5" ry="6" fill="#c9a4b8"/>
+    <path d="M12 7 C14.5 9.5 15 12 13.5 15 C12.8 16.2 11.2 16.2 10.5 15 C9 12 9.5 9.5 12 7Z" fill="#e0bcd0"/>
+    <line x1="12" y1="19" x2="12" y2="22" stroke="#a07880" stroke-width="1.5" stroke-linecap="round"/>
+  </svg>`;
+
+  const SVG_BLOOM_HALF = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+    <g transform="translate(12,13)">
+      <ellipse rx="3" ry="5" cy="-4" fill="#ffb7c5" transform="rotate(0)"/>
+      <ellipse rx="3" ry="5" cy="-4" fill="#ffb7c5" transform="rotate(72)"/>
+      <ellipse rx="3" ry="5" cy="-4" fill="#e0c0cc" opacity="0.5" transform="rotate(144)"/>
+      <ellipse rx="3" ry="5" cy="-4" fill="#e0c0cc" opacity="0.5" transform="rotate(216)"/>
+      <ellipse rx="3" ry="5" cy="-4" fill="#ffb7c5" transform="rotate(288)"/>
+      <circle r="2.5" fill="#fff0f5"/>
+    </g>
+  </svg>`;
+
+  const SVG_BLOOM_FULL = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+    <g transform="translate(12,13)">
+      <ellipse rx="3" ry="5" cy="-4" fill="#ffb7c5" transform="rotate(0)"/>
+      <ellipse rx="3" ry="5" cy="-4" fill="#ffc8d8" transform="rotate(72)"/>
+      <ellipse rx="3" ry="5" cy="-4" fill="#ffb7c5" transform="rotate(144)"/>
+      <ellipse rx="3" ry="5" cy="-4" fill="#ffc8d8" transform="rotate(216)"/>
+      <ellipse rx="3" ry="5" cy="-4" fill="#ffb7c5" transform="rotate(288)"/>
+      <circle r="2.5" fill="#fff0f5"/>
+      <circle r="1.2" fill="#ff8faa"/>
+    </g>
+  </svg>`;
+
+  function onHandResults(results) {
+    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+      handVisible = true;
+      const lm = results.multiHandLandmarks[0];
+      const openness = getHandOpenness(lm);
+      targetBloom = openness;
+
+      handStateEl.style.opacity = '1';
+      handStateEl.innerHTML = openness < 0.15 ? SVG_BUD :
+                              openness < 0.85 ? SVG_BLOOM_HALF : SVG_BLOOM_FULL;
+
+      if (openness < 0.15) {
+        hintEmoji.innerHTML = SVG_BUD;
+        hintText.textContent = '손을 천천히 펼쳐보세요';
+      } else if (openness > 0.85) {
+        hintEmoji.innerHTML = SVG_BLOOM_FULL;
+        hintText.textContent = '봄이 찾아왔어요';
+      } else {
+        hintEmoji.innerHTML = SVG_BLOOM_HALF;
+        hintText.textContent = `피어나는 중… ${Math.round(openness * 100)}%`;
+      }
+    } else {
+      handVisible = false;
+      handStateEl.style.opacity = '0';
+      targetBloom = Math.max(0, targetBloom - 0.02);
+    }
+  }
+
+  async function initMediaPipe(videoEl) {
+    loadingEl.style.display = 'flex';
+
+    const hands = new Hands({
+      locateFile: (file) =>
+        `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+    });
+
+    hands.setOptions({
+      maxNumHands: 1,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.5,
+    });
+
+    hands.onResults(onHandResults);
+
+    const camera = new Camera(videoEl, {
+      onFrame: async () => {
+        await hands.send({ image: videoEl });
+      },
+      width: 320, height: 240,
+      facingMode: 'user',
+    });
+
+    await camera.start();
+    loadingEl.style.display = 'none';
+    cameraStatus.textContent = '손을 인식 중…';
+  }
+
+  /* ═══════════════ 권한 / 초기화 ═══════════════ */
+
+  function startSliderMode() {
+    permOverlay.style.display = 'none';
+    cameraStatus.textContent = '슬라이더 모드';
+
+    // 모바일 슬라이더 이벤트
+    mobileSlider.addEventListener('input', () => {
+      targetBloom = parseInt(mobileSlider.value) / 100;
+    });
+
+    // PC에서도 슬라이더 노출 (카메라 없이 체험)
+    document.getElementById('mobile-slider-wrap').style.display = 'flex';
+    startLoop();
+  }
+
+  async function startCameraMode() {
+    permOverlay.style.display = 'none';
+    cameraMode = true;
+
+    try {
+      // 카메라 스트림 먼저 얻기 (권한 요청)
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: 320, height: 240 },
+        audio: false,
+      });
+      cameraVideo.srcObject = stream;
+      await initMediaPipe(cameraVideo);
+    } catch (err) {
+      console.warn('카메라 접근 실패:', err);
+      cameraStatus.textContent = '카메라 오류 — 슬라이더를 이용하세요';
+      startSliderMode();
+      return;
+    }
+    startLoop();
+  }
+
+  function startLoop() {
+    if (!animFrameId) smoothing();
+  }
+
+  // 초기 힌트 아이콘 설정
+  hintEmoji.innerHTML = SVG_BUD;
+
+  // ── 버튼 이벤트 ──
+  btnAllow.addEventListener('click', startCameraMode);
+  btnSkip.addEventListener('click',  startSliderMode);
+
+  // 모바일 슬라이더 항상 연결 (카메라 모드에서도 슬라이더로 보조)
+  mobileSlider.addEventListener('input', () => {
+    if (!cameraMode) {
+      targetBloom = parseInt(mobileSlider.value) / 100;
+    }
+  });
+
+  // ── 키보드 단축키 (테스트용) ──
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight') targetBloom = Math.min(1, targetBloom + 0.1);
+    if (e.key === 'ArrowLeft')  targetBloom = Math.max(0, targetBloom - 0.1);
+    if (e.key === ' ')          targetBloom = targetBloom > 0.5 ? 0 : 1;
+  });
+
+  /* ═══════════════ 터치 제스처 (모바일 스와이프) ═══════════════ */
+  let touchStartX = 0;
+  document.addEventListener('touchstart', (e) => {
+    touchStartX = e.touches[0].clientX;
+  });
+  document.addEventListener('touchmove', (e) => {
+    if (!cameraMode) return; // 슬라이더 모드엔 미적용
+    const dx = e.touches[0].clientX - touchStartX;
+    targetBloom = Math.max(0, Math.min(1, targetBloom + dx * 0.003));
+    touchStartX = e.touches[0].clientX;
+  });
+
+  </script>
+</body>
+</html>
