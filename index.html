@@ -44,6 +44,7 @@
     #petal-canvas {
       position: fixed; inset: 0; z-index: 2;
       pointer-events: none;
+      will-change: transform;
     }
 
     /* ─── UI Overlay ─── */
@@ -375,6 +376,9 @@
       🌸 벚꽃 인터랙티브 — Main Script
      ═══════════════════════════════════════════════════ */
 
+  // ── 모바일 감지 ──
+  const isMobile = /iPhone|iPad|Android|Mobile/i.test(navigator.userAgent) || window.innerWidth < 768;
+
   // ── DOM refs ──
   const bg            = document.getElementById('bg');
   const treeVideo     = document.getElementById('tree-video');
@@ -531,32 +535,34 @@
     }
 
     draw(ctx) {
-      ctx.save();
-      ctx.translate(this.x, this.y);
-      ctx.rotate(this.angle);
-      ctx.globalAlpha = Math.max(0, this.alpha);
-
-      // 꽃잎 모양 (타원형 꽃잎)
+      const a = Math.max(0, this.alpha);
+      // save/restore 대신 수동 상태 관리 (빠름)
+      ctx.globalAlpha = a;
+      ctx.setTransform(
+        Math.cos(this.angle), Math.sin(this.angle),
+        -Math.sin(this.angle), Math.cos(this.angle),
+        this.x, this.y
+      );
       ctx.beginPath();
       ctx.ellipse(0, 0, this.size * 0.5, this.size, 0, 0, Math.PI * 2);
-      ctx.fillStyle = this.color + this.alpha + ')';
+      ctx.fillStyle = this.color + a + ')';
       ctx.fill();
 
-      // 꽃잎 중앙 라인 (결)
-      ctx.beginPath();
-      ctx.moveTo(0, -this.size * 0.8);
-      ctx.lineTo(0, this.size * 0.8);
-      ctx.strokeStyle = this.color + (this.alpha * 0.3) + ')';
-      ctx.lineWidth = 0.5;
-      ctx.stroke();
-
-      ctx.restore();
+      // 모바일에서는 중앙 라인 생략 (stroke 비용 절감)
+      if (!isMobile) {
+        ctx.beginPath();
+        ctx.moveTo(0, -this.size * 0.8);
+        ctx.lineTo(0, this.size * 0.8);
+        ctx.strokeStyle = this.color + (a * 0.3) + ')';
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+      }
     }
   }
 
   const particleSystem = {
     petals: [],
-    maxPetals: 100,
+    maxPetals: isMobile ? 35 : 100,
 
     targetCount(rate) {
       // 개화율 0% → 0개, 50% → 30개, 100% → 100개
@@ -584,6 +590,9 @@
     draw() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       for (const p of this.petals) p.draw(ctx);
+      // setTransform으로 변경한 행렬 초기화
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = 1;
     }
   };
 
@@ -738,18 +747,22 @@
 
     hands.setOptions({
       maxNumHands: 1,
-      modelComplexity: 1,
-      minDetectionConfidence: 0.7,
+      modelComplexity: isMobile ? 0 : 1,   // 모바일: lite 모델
+      minDetectionConfidence: 0.6,
       minTrackingConfidence: 0.5,
     });
 
     hands.onResults(onHandResults);
 
+    // 모바일에서 매 2프레임마다 1번만 추론 (연산량 절반)
+    let frameSkip = 0;
     const camera = new Camera(videoEl, {
       onFrame: async () => {
+        if (isMobile && ++frameSkip % 2 !== 0) return;
         await hands.send({ image: videoEl });
       },
-      width: 320, height: 240,
+      width: isMobile ? 256 : 320,
+      height: isMobile ? 192 : 240,
       facingMode: 'user',
     });
 
